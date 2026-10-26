@@ -1,4 +1,3 @@
-
 package dbmanager;
 
 import java.sql.Connection;
@@ -17,7 +16,7 @@ public final class DatabaseConnection {
         System.getenv().getOrDefault("DB_USER", "root");
 
     private static final String PASSWORD =
-        System.getenv().getOrDefault("DB_PASSWORD", "");
+        System.getenv().getOrDefault("DB_PASSWORD", "aryan123");
 
     private DatabaseConnection() {
         // Prevent object creation.

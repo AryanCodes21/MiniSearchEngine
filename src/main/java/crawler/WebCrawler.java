@@ -1,230 +1,249 @@
 package crawler;
-
-import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.net.URI;
+import org.jsoup.*;
+import java.io.IOException;
 import java.sql.SQLException;
-import java.util.*;
-import org.jsoup.Connection;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.*;
 
 import dbmanager.DocumentManager;
-
 public class WebCrawler {
-    static final int MAX_DEPTH = 3, MAX_PAGES = 200;
-    static final int MIN_TEXT_LENGTH = 200;
-    static final long DELAY_MS = 500;
-    static final String DOMAIN = "timesofindia.indiatimes.com";
-    static final String USER_AGENT = "Mozilla/5.0 (compatible; MyCrawler/1.0)";
-    static final String SKIP =
-        ".*\\.(jpg|jpeg|png|gif|webp|svg|pdf|zip|mp4|css|js)$";
 
-    // Tried in order; replace/add selectors after inspecting a real article page
-    static final String[] ARTICLE_SELECTORS = {
-        "[itemprop=articleBody]", "article", "main"
-    };
-    // Elements removed from the article before reading its text
-    static final String JUNK =
-        "script, style, noscript, nav, header, footer, aside, form, "
-        + "iframe, button, .ads, .advertisement, .social-share, "
-        + ".related, .comments";
-
-    static class QItem {
-        final String url; final int depth;
-        QItem(String u, int d) { url = u; depth = d; }
-    }
-
-    static class CrawledPage {
-        String url, title, description, text;
-    }
-
-    static class Stats {
-        int attempted, ok, httpErrors, nonHtml, offsiteRedirects,
-            networkErrors, extracted, noContent;
-
-        void print(int queueLeft) {
-            int failed = httpErrors + nonHtml + offsiteRedirects + networkErrors;
-            System.out.println("---- Crawl statistics ----");
-            System.out.println("Requests attempted : " + attempted);
-            System.out.println("Fetched OK (HTML)  : " + ok);
-            System.out.println("Failed total       : " + failed);
-            System.out.println("  HTTP errors      : " + httpErrors);
-            System.out.println("  Not HTML         : " + nonHtml);
-            System.out.println("  Offsite redirect : " + offsiteRedirects);
-            System.out.println("  Network errors   : " + networkErrors);
-            System.out.println("Articles extracted : " + extracted);
-            System.out.println("No usable content  : " + noContent);
-            System.out.println("URLs left in queue : " + queueLeft);
-        }
-    }
-
-    static final Stats stats = new Stats();
-
-    public static void main(String[] args) throws Exception {
-        List<CrawledPage> pages =
-            crawl("https://timesofindia.indiatimes.com/");
-        System.out.println("Articles extracted: " + pages.size());
-    }
-
-    static List<CrawledPage> crawl(String start) throws InterruptedException {
-        Set<String> queued = new HashSet<>();
-        Queue<QItem> queue = new ArrayDeque<>();
-        List<CrawledPage> results = new ArrayList<>();
-
-        // 1. Validate the starting URL before anything is queued
-        String first = normalize(start);
-        if (first == null) {
-            System.out.println("Invalid start URL (or outside "
-                + DOMAIN + "): " + start);
-            return results;
-        }
-        queued.add(first);
-        queue.add(new QItem(first, 1));
-
-        while (!queue.isEmpty() && stats.attempted < MAX_PAGES) {
-            QItem item = queue.poll();
-            stats.attempted++;
-
-            Document doc = fetch(item.url);
-            Thread.sleep(DELAY_MS); // 4. delay applies after failures too
-            if (doc == null) continue;
+	// ANSI colour codes
+	private static final String RESET = "\u001B[0m";
+	private static final String CYAN = "\u001B[36m";
+	private static final String GREEN = "\u001B[32m";
+	private static final String YELLOW = "\u001B[33m";
+	private static final String BLUE = "\u001B[34m";
+	private static final String RED = "\u001B[31m";
 
 
-		CrawledPage p = extract(item.url, doc);
+	 // Websites where our crawler begins its search
+    private static final List<String> SEED_URLS = Arrays.asList(
+        "https://en.wikipedia.org/",
+        "https://www.bbc.com/",
+        "https://www.nationalgeographic.com/"
+    );
+
+    // Domains the crawler is permitted to visit
+    private static final Set<String> ALLOWED_DOMAINS = new HashSet<>(
+        Arrays.asList(
+            "en.wikipedia.org",
+            "www.bbc.com",
+            "www.nationalgeographic.com"
+        )
+    );
+	
+	public static void main(String[] args) {
+
+	    ArrayList<String> visited = new ArrayList<>();
+
+	    for (String url : SEED_URLS) {
+	        crawl(1, url, visited);
+	    }
+	}
+	private static void crawl(int level,String url,ArrayList<String> v)
+	{
 		
-		if (p.text != null && p.text.length() >= MIN_TEXT_LENGTH) {
-		    results.add(p);
-		    stats.extracted++;
-		
-		    // Save the extracted page to the database
-		    try {
-		        DocumentManager.saveDocument(
-		            p.url,
-		            p.title,
-		            p.description,
-		            p.text
-		        );
-		        System.out.println("Saved to database: " + p.url);
-		
-		    } catch (SQLException e) {
-		        System.err.println(
-		            "Failed to save " + p.url + ": " + e.getMessage()
-		        );
+
+		    // Stop when maximum depth is reached
+		    if (level > 5) {
+		        return;
 		    }
-		
-		} else {
-		    stats.noContent++;
+
+		    // Skip already visited URLs
+		    if (v.contains(url)) {
+		        return;
+		    }
+
+		    Document doc = request(url, v);
+
+		    // IMPORTANT: Check before accessing doc
+		    if (doc == null) {
+		        System.out.println(
+		            RED + "Skipping unavailable page: " + url + RESET
+		        );
+		        return;
+		    }
+
+		    // Find links on this page
+		    for (Element link : doc.select("a[href]")) {
+
+		        String next_link = link.absUrl("href");
+
+		        if (next_link.isEmpty()) {
+		            continue;
+		        }
+
+		        // Only crawl Times of India
+		        try {
+		            URI uri = URI.create(next_link);
+
+		            String scheme = uri.getScheme();
+		            String host = uri.getHost();
+
+		            if (scheme == null ||
+		                !(scheme.equalsIgnoreCase("http")
+		                  || scheme.equalsIgnoreCase("https"))) {
+		                continue;
+		            }
+
+		            if (host == null ||
+		                !ALLOWED_DOMAINS.contains(host.toLowerCase())) {
+		                continue;
+		            }
+
+		        } catch (IllegalArgumentException e) {
+		            continue;
+		        }
+
+		        // Avoid duplicate visits
+		        if (!v.contains(next_link)) {
+		            crawl(level + 1, next_link, v);
+		        
+		    }
 		}
+	}
+	private static Document request(String url,ArrayList<String> v)
+	{
+		try
+		{
+			Connection con=Jsoup.connect(url);
+			Document doc=con.get();
+			System.out.println("Page title: " + doc.title());
 
+			System.out.println("article elements: " +
+			        doc.select("article").size());
 
-            if (item.depth < MAX_DEPTH) {
-                for (Element a : doc.select("a[href]")) {
-                    String link = normalize(a.absUrl("href"));
-                    if (link != null && queued.add(link))
-                        queue.add(new QItem(link, item.depth + 1));
-                }
-            }
-        }
-        stats.print(queue.size());
-        return results;
-    }
+			System.out.println("main elements: " +
+			        doc.select("main").size());
 
-    // 3. Check status code and content type before parsing
-    static Document fetch(String url) {
-        try {
-            Connection.Response res = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(15000)
-                .ignoreHttpErrors(true)   // we check the status ourselves
-                .ignoreContentType(true)  // we check the type ourselves
-                .execute();
+			System.out.println("articleBody elements: " +
+			        doc.select("[itemprop=articleBody]").size());
 
-            int code = res.statusCode();
-            if (code != 200) {
-                stats.httpErrors++;
-                System.out.println("HTTP " + code + ": " + url);
-                return null;
-            }
+			System.out.println("Elements with content-related classes:");
 
-            String type = res.contentType();
-            String t = type == null ? "" : type.toLowerCase(Locale.ROOT);
-            if (!t.startsWith("text/html")
-                    && !t.startsWith("application/xhtml")) {
-                stats.nonHtml++;
-                System.out.println("Not HTML (" + type + "): " + url);
-                return null;
-            }
+			for (Element element : doc.select("[class]")) {
+			    String className = element.className().toLowerCase();
 
-            // A redirect may have taken us to another site
-            if (normalize(res.url().toString()) == null) {
-                stats.offsiteRedirects++;
-                System.out.println("Redirected off-site: " + url);
-                return null;
-            }
+			    if (className.contains("article")
+			            || className.contains("story")
+			            || className.contains("content")) {
 
-            stats.ok++;
-            return res.parse();
-        } catch (IOException e) {
-            stats.networkErrors++;
-            System.out.println("FAILED " + url + ": " + e.getMessage());
-            return null;
-        }
-    }
+			        System.out.println(element.tagName() + " class=" +
+			                element.className());
+			    }
+			}
+			
+			if(con.response().statusCode() == 200)
+			{
+		
+				System.out.println(CYAN + "\nURL: " + url + RESET);
 
-    static CrawledPage extract(String url, Document doc) {
-        CrawledPage p = new CrawledPage();
-        p.url = url;
-        p.title = meta(doc, "meta[property=og:title]");
-        if (p.title.isEmpty()) p.title = doc.title();
-        p.description = meta(doc, "meta[property=og:description]");
-        p.text = extractText(doc);
-        return p;
-    }
+				System.out.println(
+				    GREEN + "TITLE: " + doc.title() + RESET
+				);
 
-    // 5. Try selectors in priority order, strip junk, prefer the fullest match
-    static String extractText(Document doc) {
-        String best = "";
-        for (String sel : ARTICLE_SELECTORS) {
-            String longest = "";
-            for (Element el : doc.select(sel)) {
-                Element copy = el.clone(); // don't modify the original document
-                copy.select(JUNK).remove();
-                String text = copy.text();
-                if (text.length() > longest.length()) longest = text;
-            }
-            if (longest.length() >= MIN_TEXT_LENGTH) return longest;
-            if (longest.length() > best.length()) best = longest;
-        }
-        return best;
-    }
+				// Step 1: Try Wikipedia's main content container
+				Element article = doc.selectFirst("#mw-content-text");
 
-    static String meta(Document d, String sel) {
-        Element e = d.selectFirst(sel);
-        return e == null ? "" : e.attr("content");
-    }
+				// Step 2: If not found, try common article containers
+				if (article == null) {
+				    article = doc.selectFirst(
+				        "article, main, [itemprop=articleBody]"
+				    );
+				}
 
-    // 2. Lowercases scheme/host and validates the domain exactly
-    static String normalize(String url) {
-        if (url == null || url.trim().isEmpty()) return null;
-        try {
-            URI u = new URI(url.trim());
-            if (u.getScheme() == null || u.getHost() == null) return null;
+				// Step 3: If still not found, try common content containers
+				if (article == null) {
+				    article = doc.selectFirst(
+				        "#content, .article-content, .article-body, " +
+				        ".story-content, .story-body, .content"
+				    );
+				}
 
-            String sch = u.getScheme().toLowerCase(Locale.ROOT);
-            String host = u.getHost().toLowerCase(Locale.ROOT);
+				if (article != null) {
 
-            if (!sch.equals("http") && !sch.equals("https")) return null;
-            if (!host.equals(DOMAIN) && !host.endsWith("." + DOMAIN))
-                return null;
+				    // Clone so we don't modify the original document
+				    Element cleanArticle = article.clone();
 
-            String path = (u.getPath() == null || u.getPath().isEmpty())
-                ? "/" : u.getPath();
-            if (path.toLowerCase(Locale.ROOT).matches(SKIP)) return null;
+				    // Remove unwanted elements
+				    cleanArticle.select(
+				        "script, style, nav, footer, header, " +
+				        ".mw-editsection, .navbox, .metadata, " +
+				        ".reflist, .reference, .noprint, .toc, " +
+				        ".advertisement, .ads, .social-share"
+				    ).remove();
 
-            return new URI("https", host, path, u.getQuery(), null)
-                .toString();
-        } catch (Exception e) {
-            return null;
-        }
-    }
+				    // Extract the text
+				    String content = cleanArticle.text();
+
+				    System.out.println(
+				        YELLOW + "\nPAGE CONTENT:\n" + content + RESET
+				    );
+
+				    if (content != null && content.length() > 200) {
+				        try {
+				            String title = doc.title();
+
+				            String description = "";
+				            Element meta = doc.selectFirst(
+				                "meta[property=og:description]"
+				            );
+
+				            if (meta != null) {
+				                description = meta.attr("content");
+				            }
+
+				            DocumentManager.saveDocument(
+				                url,
+				                title,
+				                description,
+				                content
+				            );
+
+				            System.out.println(
+				                GREEN + "Saved to database: " + url + RESET
+				            );
+
+				        } catch (SQLException e) {
+				            System.err.println(
+				                RED + "Database save failed: "
+				                + e.getMessage() + RESET
+				            );
+				        }
+				    }
+
+				    System.out.println(
+				        BLUE + "\nTotal characters: " +
+				        content.length() + RESET
+				    );
+
+				} else {
+
+				    System.out.println(
+				        RED + "Main content not found for: " +
+				        url + RESET
+				    );
+				
+
+				}
+				
+				v.add(url);
+				return doc;
+			}
+		}
+		catch(IOException e) {
+		return null;
+		}
+		return null;
+		
+	}
+
 }
