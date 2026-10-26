@@ -12,7 +12,9 @@ import java.sql.SQLException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.*;
 
+import dbmanager.DatabaseConnection;
 import dbmanager.DocumentManager;
+import dbmanager.PostingManager;
 public class WebCrawler {
 
 	// ANSI colour codes
@@ -81,7 +83,7 @@ public class WebCrawler {
 		            continue;
 		        }
 
-		        // Only crawl Times of India
+
 		        try {
 		            URI uri = URI.create(next_link);
 
@@ -106,8 +108,16 @@ public class WebCrawler {
 		        // Avoid duplicate visits
 		        if (!v.contains(next_link)) {
 		            crawl(level + 1, next_link, v);
+		            
+		            
 		        
-		    }
+		        }
+		        try(java.sql.Connection con=DatabaseConnection.getConnection();) {
+					PostingManager.indexPendingDocuments(con);
+				} catch (SQLException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
 		}
 	}
 	private static Document request(String url,ArrayList<String> v)
