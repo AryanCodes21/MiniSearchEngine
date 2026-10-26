@@ -22,10 +22,17 @@ public final class DatabaseConnection {
         // Prevent object creation.
     }
 
-    public static Connection getConnection()
-            throws SQLException {
-        return DriverManager.getConnection(
-            URL, USER, PASSWORD
+public static Connection getConnection() throws SQLException {
+    try {
+        Class.forName("com.mysql.cj.jdbc.Driver");
+    } catch (ClassNotFoundException e) {
+        throw new SQLException(
+            "MySQL JDBC driver class could not be loaded.", e
         );
     }
+
+    return DriverManager.getConnection(URL, USER, PASSWORD);
+}
+
+
 }

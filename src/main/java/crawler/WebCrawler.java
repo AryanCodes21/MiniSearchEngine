@@ -27,29 +27,60 @@ public class WebCrawler {
 
 
 	 // Websites where our crawler begins its search
-    private static final List<String> SEED_URLS = Arrays.asList(
-        "https://en.wikipedia.org/",
-        "https://www.bbc.com/",
-        "https://www.nationalgeographic.com/"
-    );
+	private static final List<String> SEED_URLS = Arrays.asList(
+		    "https://en.wikipedia.org/",
+		    "https://www.bbc.com/",
+		    "https://www.theguardian.com/",
+		    "https://www.nasa.gov/",
+		    "https://www.nationalgeographic.com/",
+		    "https://techcrunch.com/",
+		    "https://www.khanacademy.org/",
+		    "https://arxiv.org/",
+		    "https://stackoverflow.com/",
+		    "https://developer.mozilla.org/"
+		);
 
     // Domains the crawler is permitted to visit
-    private static final Set<String> ALLOWED_DOMAINS = new HashSet<>(
-        Arrays.asList(
-            "en.wikipedia.org",
-            "www.bbc.com",
-            "www.nationalgeographic.com"
-        )
-    );
+	private static final Set<String> ALLOWED_DOMAINS = new HashSet<>(
+		    Arrays.asList(
+		        "en.wikipedia.org",
+		        "www.bbc.com",
+		        "www.theguardian.com",
+		        "www.nasa.gov",
+		        "www.nationalgeographic.com",
+		        "techcrunch.com",
+		        "www.khanacademy.org",
+		        "arxiv.org",
+		        "stackoverflow.com",
+		        "developer.mozilla.org"
+		    )
+		);
 	
-	public static void main(String[] args) {
+    public static void main(String[] args) {
 
-	    ArrayList<String> visited = new ArrayList<>();
+        ArrayList<String> visited = new ArrayList<>();
 
-	    for (String url : SEED_URLS) {
-	        crawl(1, url, visited);
-	    }
-	}
+        System.out.println("=== WanderSearchEngine ===");
+        System.out.println("[Phase 1] Starting crawler...");
+
+        for (String url : SEED_URLS) {
+            crawl(1, url, visited);
+        }
+
+        System.out.println("[Phase 1] Crawling complete.");
+        System.out.println("[Phase 2] Starting indexing...");
+
+        try (java.sql.Connection con = DatabaseConnection.getConnection()) {
+            PostingManager.indexPendingDocuments(con);
+            System.out.println("[Phase 2] Indexing complete.");
+        } catch (SQLException e) {
+            System.err.println("Indexing failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        System.out.println("WanderSearchEngine pipeline finished.");
+    }
+
 	private static void crawl(int level,String url,ArrayList<String> v)
 	{
 		
@@ -112,20 +143,23 @@ public class WebCrawler {
 		            
 		        
 		        }
-		        try(java.sql.Connection con=DatabaseConnection.getConnection();) {
-					PostingManager.indexPendingDocuments(con);
-				} catch (SQLException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
+//		        try(java.sql.Connection con=DatabaseConnection.getConnection();) {
+//					PostingManager.indexPendingDocuments(con);
+//				} catch (SQLException e) {
+//					// TODO Auto-generated catch block
+//					e.printStackTrace();
+//				}
 		}
 	}
 	private static Document request(String url,ArrayList<String> v)
 	{
 		try
 		{
-			Connection con=Jsoup.connect(url);
-			Document doc=con.get();
+			Connection con = Jsoup.connect(url)
+			        .userAgent("Mozilla/5.0")
+			        .timeout(5000);
+
+			Document doc = con.get();
 			System.out.println("Page title: " + doc.title());
 
 			System.out.println("article elements: " +
